@@ -1,0 +1,7 @@
+{
+  "name": "m3u8-proxy",
+  "version": "1.0.0",
+  "description": "HLS Proxy with Referer header for Vercel",
+  "main": "api/proxy.js",
+  "dependencies": {}
+}
