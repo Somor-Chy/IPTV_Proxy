@@ -5,15 +5,11 @@ export default async function handler(req, res) {
     return res.status(400).send('❌ url parameter missing');
   }
 
-  // শুধুমাত্র নির্দিষ্ট ডোমেইন অনুমোদন (নিরাপত্তার জন্য)
-  const allowedDomain = 'cdn.ghuddi.live';
+  // URL বৈধ কিনা চেক করা (কিন্তু ডোমেইন রেস্ট্রিকশন সরানো হয়েছে)
   try {
-    const urlObj = new URL(url);
-    if (urlObj.hostname !== allowedDomain) {
-      return res.status(403).send('❌ This domain is not allowed');
-    }
+    new URL(url);
   } catch (e) {
-    return res.status(400).send('❌ Invalid URL');
+    return res.status(400).send('❌ Invalid URL format');
   }
 
   try {
@@ -21,12 +17,12 @@ export default async function handler(req, res) {
     const response = await fetch(url, {
       headers: {
         'Referer': 'https://www.ghuddi.tv/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
       }
     });
 
     if (!response.ok) {
-      return res.status(response.status).send('Source server error');
+      return res.status(response.status).send(`Source server error: ${response.status} ${response.statusText}`);
     }
 
     // কন্টেন্ট টাইপ সেট করা
@@ -40,21 +36,30 @@ export default async function handler(req, res) {
       // বেস URL বের করা (যাতে আপেক্ষিক পাথকে পরম পাথে রূপান্তর করা যায়)
       const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
       
+      // বর্তমান প্রক্সির বেস URL বের করা
+      const protocol = req.headers['x-forwarded-proto'] || 'https';
+      const host = req.headers.host;
+      const baseProxyUrl = `${protocol}://${host}${req.url.split('?')[0]}`;
+      
       // প্রতিটি লাইন চেক করা
       const modifiedData = data.split('\n').map(line => {
         const trimmed = line.trim();
-        // যদি লাইন খালি না হয় এবং কমেন্ট না হয় এবং .ts ফাইল হয়
-        if (trimmed && !trimmed.startsWith('#') && (trimmed.endsWith('.ts') || trimmed.includes('.ts?'))) {
+        // যদি লাইন খালি না হয় এবং কমেন্ট না হয় এবং এটি একটি মিডিয়া ফাইল হয় (.ts, .m3u8, .m3u, .key, .vtt ইত্যাদি)
+        if (trimmed && !trimmed.startsWith('#')) {
           // আপেক্ষিক পাথকে পরম URL বানানো
           let absoluteUrl;
-          if (trimmed.startsWith('http')) {
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
             absoluteUrl = trimmed;
           } else {
-            absoluteUrl = new URL(trimmed, baseUrl).toString();
+            try {
+              absoluteUrl = new URL(trimmed, baseUrl).toString();
+            } catch (e) {
+              // URL তৈরি করতে সমস্যা হলে মূল লাইন ফেরত দিন
+              return line;
+            }
           }
           // প্রক্সির মাধ্যমে কল করার জন্য URL তৈরি
-          const callbackUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}${req.url.split('?')[0]}?url=${encodeURIComponent(absoluteUrl)}`;
-          return callbackUrl;
+          return `${baseProxyUrl}?url=${encodeURIComponent(absoluteUrl)}`;
         }
         return line;
       }).join('\n');
